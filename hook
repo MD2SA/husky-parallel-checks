@@ -1,0 +1,252 @@
+#!/usr/bin/env sh
+
+# ─────────────────────────────────────────────
+# User configuration
+# ─────────────────────────────────────────────
+
+CHECKS="
+ESLint|pnpm lint
+TypeScript|pnpm typecheck
+Tests|pnpm test:changed
+"
+
+SPINNER_INTERVAL=0.1
+
+# ─────────────────────────────────────────────
+# Setup
+# ─────────────────────────────────────────────
+
+start_time=$(date +%s)
+
+tmp_dir=$(mktemp -d) || exit 1
+
+ESC=$(printf '\033')
+RESET="${ESC}[0m"
+BOLD="${ESC}[1m"
+DIM="${ESC}[2m"
+GREEN="${ESC}[32m"
+RED="${ESC}[31m"
+CYAN="${ESC}[36m"
+GRAY="${ESC}[90m"
+
+check_count=0
+completed=0
+frame=0
+rendered_lines=0
+
+cleanup() {
+    rm -rf "$tmp_dir"
+    printf '%s[?25h' "$ESC"
+}
+
+abort() {
+    i=1
+
+    while [ "$i" -le "$check_count" ]; do
+        eval "pid=\$check_pid_$i"
+
+        if [ -n "$pid" ]; then
+            kill "$pid" 2>/dev/null
+        fi
+
+        i=$((i + 1))
+    done
+
+    cleanup
+    exit 130
+}
+
+trap cleanup EXIT
+trap abort INT TERM
+
+printf '%s[?25l' "$ESC"
+
+while IFS='|' read -r name command; do
+    [ -z "$name" ] && continue
+
+    check_count=$((check_count + 1))
+
+    eval "check_name_$check_count=\$name"
+    eval "check_command_$check_count=\$command"
+    eval "check_start_$check_count=\$(date +%s)"
+    eval "check_done_$check_count=0"
+    eval "check_exit_$check_count=0"
+    eval "check_time_$check_count=0"
+
+    result_file="$tmp_dir/check-$check_count"
+
+    (
+        sh -c "$command" >/dev/null 2>&1
+        exit_code=$?
+
+        printf '%s\n' "$exit_code" >"$result_file"
+    ) &
+
+    eval "check_pid_$check_count=\$!"
+done <<EOF
+$CHECKS
+EOF
+
+get_spinner() {
+    case "$frame" in
+    0) printf '⠋' ;;
+    1) printf '⠙' ;;
+    2) printf '⠹' ;;
+    3) printf '⠸' ;;
+    4) printf '⠼' ;;
+    5) printf '⠴' ;;
+    6) printf '⠦' ;;
+    7) printf '⠧' ;;
+    8) printf '⠇' ;;
+    9) printf '⠏' ;;
+    esac
+}
+
+render() {
+    spinner=$(get_spinner)
+
+    if [ "$rendered_lines" -gt 0 ]; then
+        printf '%s[%dA' "$ESC" "$rendered_lines"
+    fi
+
+    lines=0
+    i=1
+
+    while [ "$i" -le "$check_count" ]; do
+        eval "name=\$check_name_$i"
+        eval "command=\$check_command_$i"
+        eval "done=\$check_done_$i"
+        eval "exit_code=\$check_exit_$i"
+        eval "elapsed=\$check_time_$i"
+
+        printf '%s[K' "$ESC"
+
+        if [ "$done" -eq 1 ]; then
+            if [ "$exit_code" -eq 0 ]; then
+                printf '%s✓%s %-12s passed %s(%ss)%s\n' \
+                    "$GREEN" \
+                    "$RESET" \
+                    "$name" \
+                    "$DIM" \
+                    "$elapsed" \
+                    "$RESET"
+
+                lines=$((lines + 1))
+            else
+                printf '%s✗%s %-12s failed %s(%ss)%s\n' \
+                    "$RED" \
+                    "$RESET" \
+                    "$name" \
+                    "$DIM" \
+                    "$elapsed" \
+                    "$RESET"
+
+                printf '%s[K    └──> Run: %s%s%s\n' \
+                    "$ESC" \
+                    "$BOLD" \
+                    "$command" \
+                    "$RESET"
+
+                lines=$((lines + 2))
+            fi
+        else
+            printf '%s%s%s %-12s checking...\n' \
+                "$CYAN" \
+                "$spinner" \
+                "$RESET" \
+                "$name"
+
+            lines=$((lines + 1))
+        fi
+
+        i=$((i + 1))
+    done
+
+    rendered_lines=$lines
+}
+
+printf '\n'
+printf '%s%sChecks%s\n' \
+    "$BOLD" \
+    "$CYAN" \
+    "$RESET"
+
+printf '%s────────────────────────────────────────%s\n' \
+    "$GRAY" \
+    "$RESET"
+
+while [ "$completed" -lt "$check_count" ]; do
+
+    i=1
+
+    while [ "$i" -le "$check_count" ]; do
+        eval "done=\$check_done_$i"
+
+        result_file="$tmp_dir/check-$i"
+
+        if [ "$done" -eq 0 ] && [ -f "$result_file" ]; then
+            exit_code=$(cat "$result_file")
+
+            eval "start=\$check_start_$i"
+
+            elapsed=$(($(date +%s) - start))
+
+            eval "check_exit_$i=\$exit_code"
+            eval "check_time_$i=\$elapsed"
+            eval "check_done_$i=1"
+
+            completed=$((completed + 1))
+        fi
+
+        i=$((i + 1))
+    done
+
+    render
+
+    frame=$(((frame + 1) % 10))
+
+    if [ "$completed" -lt "$check_count" ]; then
+        sleep "$SPINNER_INTERVAL"
+    fi
+done
+
+overall_failed=0
+
+i=1
+
+while [ "$i" -le "$check_count" ]; do
+    eval "pid=\$check_pid_$i"
+    eval "exit_code=\$check_exit_$i"
+
+    wait "$pid" 2>/dev/null || true
+
+    if [ "$exit_code" -ne 0 ]; then
+        overall_failed=1
+    fi
+
+    i=$((i + 1))
+done
+
+render
+
+total_time=$(($(date +%s) - start_time))
+
+printf '%s────────────────────────────────────────%s\n' \
+    "$GRAY" \
+    "$RESET"
+
+if [ "$overall_failed" -ne 0 ]; then
+    printf '%sTotal: %ss%s\n\n' \
+        "$RED" \
+        "$total_time" \
+        "$RESET"
+
+    exit 1
+fi
+
+printf '%sTotal: %ss%s\n\n' \
+    "$GREEN" \
+    "$total_time" \
+    "$RESET"
+
+exit 0

@@ -2,13 +2,17 @@
 
 A lightweight Husky hook that runs multiple checks in parallel with a live terminal spinner.
 
+<p align="center">
+  <img src="preview.gif" alt="Preview" width="350">
+</p>
+
 ## Features
 
 * Runs checks in parallel
 * Live spinner for running checks
 * Individual execution times
 * Clear pass/fail output
-* Fails the push if any check fails
+* Fails the hook if any check fails
 * Handles `Ctrl+C` gracefully
 * No external dependencies
 * Uses POSIX `sh`
@@ -18,8 +22,8 @@ A lightweight Husky hook that runs multiple checks in parallel with a live termi
 Copy the hook into your project's Husky directory:
 
 ```bash
-cp hook .husky/pre-push
-chmod +x .husky/pre-push
+cp hook .husky/<hook>
+chmod +x .husky/<hook>
 ```
 
 Make sure [Husky](https://typicode.github.io/husky/) is already configured in your project.
@@ -60,7 +64,7 @@ All checks are started in parallel.
 While checks are running:
 
 ```text
-Pre-push checks
+Checks
 ────────────────────────────────────────
 ⠋ ESLint       checking...
 ⠋ TypeScript   checking...
@@ -70,7 +74,7 @@ Pre-push checks
 When completed:
 
 ```text
-Pre-push checks
+Checks
 ────────────────────────────────────────
 ✓ ESLint       passed (4s)
 ✗ TypeScript   failed (2s)
